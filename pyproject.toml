@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "keeforge-kdbx-recovery"
+version = "0.1.0"
+description = "Offline recovery of KDBX 4 databases containing XML-invalid characters"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+dependencies = ["pykeepass==4.1.1.post1", "construct==2.10.70"]
+
+[project.scripts]
+kdbx-recover = "kdbx_recovery.cli:main"
+
+[project.urls]
+Repository = "https://github.com/KeeForge/kdbx-recovery"
+Issues = "https://github.com/KeeForge/kdbx-recovery/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.11,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kdbx_recovery"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
