@@ -307,3 +307,57 @@ def test_protected_nul_is_preserved_exactly():
         cipher.decrypt(b64decode(e.text or "")) for e in tree.xpath('//Value[@Protected="True"]')
     ]
     assert b"Example heading\0\r\nExample body" in values
+
+
+def test_multiblock_payload_and_middle_block_authentication(make_database, tmp_path):
+    def transform(xml):
+        return xml.replace(b"</Root>", b"<Extra>" + b"x" * 2_200_000 + b"\0</Extra></Root>")
+
+    damaged, payload = make_database(transform, compression=False)
+    original = open_raw(damaged, PASSWORD)
+    block_offsets = []
+    offset = original.header.length + 64
+    while offset < len(damaged):
+        length = struct.unpack_from("<I", damaged, offset + 32)[0]
+        if not length:
+            break
+        block_offsets.append(offset)
+        offset += 36 + length
+    assert len(block_offsets) >= 3
+    tampered = bytearray(damaged)
+    tampered[block_offsets[1] + 36] ^= 1
+    with pytest.raises(RecoveryError, match="authenticate"):
+        recover_bytes(tampered, PASSWORD)
+    recovered, report = recover_bytes(damaged, PASSWORD)
+    assert report.removed == {0: 1}
+    assert open_raw(recovered, PASSWORD).body.payload == expected_without_nul(payload)
+    assert ordinary_open(recovered).entries
+
+
+def test_keepassxc_real_keeforge_regression(tmp_path):
+    executable = os.environ.get("KEEPASSXC_CLI")
+    if not executable:
+        pytest.skip("Set KEEPASSXC_CLI to require independent interoperability checks")
+    recovered, _ = recover_bytes((FIXTURES / "keeforge-nul.kdbx").read_bytes(), PASSWORD)
+    path = tmp_path / "recovered.kdbx"
+    path.write_bytes(recovered)
+    result = subprocess.run(
+        [executable, "export", "-q", str(path)],
+        input=PASSWORD + "\n",
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    tree = etree.fromstring(result.stdout.encode())
+    notes = tree.xpath('//Entry/String[Key="Notes"]/Value/text()')
+    assert any("Example heading" in text and "Example body" in text for text in notes)
+
+
+def test_duplicate_inner_header(make_database):
+    damaged, _ = make_database(
+        inject,
+        inner_transform=lambda inner: struct.pack("<BI", 1, 4) + struct.pack("<I", 3) + inner,
+    )
+    with pytest.raises(RecoveryError, match="duplicate stream"):
+        recover_bytes(damaged, PASSWORD)
